@@ -13,6 +13,7 @@ import 'package:shiftsync/features/admin/presentation/screens/employee_detail_sc
 import 'package:shiftsync/features/admin/presentation/screens/onboard_employer_screen.dart';
 import 'package:shiftsync/features/admin/presentation/screens/edit_employer_screen.dart';
 import 'package:shiftsync/features/admin/presentation/screens/onboard_employee_screen.dart';
+import 'package:shiftsync/features/admin/presentation/screens/admin_schedules_archive_screen.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
@@ -495,6 +496,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
   Widget _buildEmployeesTab() {
     final employeesStream = ref.watch(adminEmployeesProvider);
     final employersStream = ref.watch(adminEmployersProvider);
+    final shiftsStream = ref.watch(adminShiftsProvider);
 
     return Padding(
       padding: const EdgeInsets.all(20.0),
@@ -605,19 +607,59 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                             Builder(
                               builder: (context) {
                                 final employersList = employersStream.value ?? [];
+                                final shiftsList = shiftsStream.value ?? [];
+                                final now = DateTime.now();
+                                final todayShifts = shiftsList.where((s) =>
+                                    s.employeeId == employee.employeeId &&
+                                    s.startTime.year == now.year &&
+                                    s.startTime.month == now.month &&
+                                    s.startTime.day == now.day
+                                ).toList();
+
+                                if (todayShifts.length > 1) {
+                                  todayShifts.sort((a, b) {
+                                    int score(ShiftModel s) {
+                                      if (s.status == 'in_progress') return 3;
+                                      if (s.status == 'scheduled') return 2;
+                                      if (s.status == 'completed') return 1;
+                                      return 0;
+                                    }
+                                    return score(b).compareTo(score(a));
+                                  });
+                                }
+
+                                final String? employerId;
+                                final bool isTodayAssignment;
+                                if (todayShifts.isNotEmpty) {
+                                  employerId = todayShifts.first.employerId;
+                                  isTodayAssignment = true;
+                                } else {
+                                  employerId = employee.employerId;
+                                  isTodayAssignment = false;
+                                }
+
                                 final matchingEmployer = employersList.firstWhere(
-                                  (emp) => emp.employerId == employee.employerId,
+                                  (emp) => emp.employerId == employerId,
                                   orElse: () => UserModel(
                                     uid: '',
                                     email: '',
-                                    fullName: employee.employerId ?? 'None Assigned',
+                                    fullName: employerId ?? 'None Assigned',
                                     role: UserRole.employer,
                                     createdAt: DateTime.now(),
                                     updatedAt: DateTime.now(),
                                     isActive: true,
                                   ),
                                 );
-                                return Text('Employer Org: ${matchingEmployer.fullName}', style: const TextStyle(fontSize: 10, color: AppColors.outline, fontWeight: FontWeight.bold));
+                                return Text(
+                                  isTodayAssignment
+                                      ? 'Employer Org: ${matchingEmployer.fullName} (Today\'s Shift)'
+                                      : 'Employer Org: ${matchingEmployer.fullName}',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: isTodayAssignment ? AppColors.success : AppColors.outline,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                );
                               },
                             ),
                           ],
@@ -670,53 +712,69 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                       ),
                 ),
                 // Pop-up menu or combo button for options
-                PopupMenuButton<String>(
-                  icon: const Icon(Icons.add_circle, color: Colors.amber, size: 36),
-                  onSelected: (value) {
-                    if (value == 'shift') {
-                      employeesStream.whenData((employees) {
-                        locationsStream.whenData((locations) {
-                          if (employees.isEmpty || locations.isEmpty) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Please onboard both Employees and Locations before scheduling shifts.')),
-                            );
-                          } else {
-                            _showCreateShiftSheet(context, employees, locations);
-                          }
-                        });
-                      });
-                    } else if (value == 'location') {
-                      employersStream.whenData((employers) {
-                        if (employers.isEmpty) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Please onboard an Employer before adding geofenced locations.')),
-                          );
-                        } else {
-                          _showAddLocationSheet(context, employers);
-                        }
-                      });
-                    }
-                  },
-                  itemBuilder: (BuildContext context) => [
-                    const PopupMenuItem(
-                      value: 'shift',
-                      child: Row(
-                        children: [
-                          Icon(Icons.calendar_month, color: AppColors.primary),
-                          SizedBox(width: 8),
-                          Text('Create Shift Schedule'),
-                        ],
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.archive_outlined, color: AppColors.primary, size: 28),
+                      tooltip: 'View Schedules Archive',
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const AdminSchedulesArchiveScreen(),
+                        ),
                       ),
                     ),
-                    const PopupMenuItem(
-                      value: 'location',
-                      child: Row(
-                        children: [
-                          Icon(Icons.pin_drop, color: Colors.amber),
-                          SizedBox(width: 8),
-                          Text('Add Work Location'),
-                        ],
-                      ),
+                    const SizedBox(width: 8),
+                    PopupMenuButton<String>(
+                      icon: const Icon(Icons.add_circle, color: Colors.amber, size: 36),
+                      onSelected: (value) {
+                        if (value == 'shift') {
+                          employeesStream.whenData((employees) {
+                            locationsStream.whenData((locations) {
+                              if (employees.isEmpty || locations.isEmpty) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Please onboard both Employees and Locations before scheduling shifts.')),
+                                );
+                              } else {
+                                _showCreateShiftSheet(context, employees, locations);
+                              }
+                            });
+                          });
+                        } else if (value == 'location') {
+                          employersStream.whenData((employers) {
+                            if (employers.isEmpty) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Please onboard an Employer before adding geofenced locations.')),
+                              );
+                            } else {
+                              _showAddLocationSheet(context, employers);
+                            }
+                          });
+                        }
+                      },
+                      itemBuilder: (BuildContext context) => [
+                        const PopupMenuItem(
+                          value: 'shift',
+                          child: Row(
+                            children: [
+                              Icon(Icons.calendar_month, color: AppColors.primary),
+                              SizedBox(width: 8),
+                              Text('Create Shift Schedule'),
+                            ],
+                          ),
+                        ),
+                        const PopupMenuItem(
+                          value: 'location',
+                          child: Row(
+                            children: [
+                              Icon(Icons.pin_drop, color: Colors.amber),
+                              SizedBox(width: 8),
+                              Text('Add Work Location'),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -738,14 +796,47 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                   // Tab Content: Shifts List
                   shiftsStream.when(
                     data: (list) {
-                      if (list.isEmpty) {
+                      final attendanceList = attendanceStream.value ?? [];
+
+                      // Filter out completed and missed shifts for active Roster view
+                      final activeList = list.where((shift) {
+                        final matchingRecord = attendanceList.firstWhere(
+                          (r) => r.shiftId == shift.id,
+                          orElse: () => AttendanceRecordModel(
+                            id: '',
+                            employeeId: '',
+                            employeeName: '',
+                            employerId: '',
+                            shiftId: '',
+                            punchInTime: DateTime.fromMillisecondsSinceEpoch(0),
+                            punchInLatitude: 0,
+                            punchInLongitude: 0,
+                            punchInVerified: false,
+                            approvedStatus: 'pending',
+                          ),
+                        );
+
+                        if (matchingRecord.id.isNotEmpty) {
+                          if (matchingRecord.punchInTime != null && matchingRecord.punchOutTime != null) {
+                            return false; // completed shifts are archived
+                          }
+                          return true; // in progress shift is active
+                        } else {
+                          if (shift.endTime.isBefore(DateTime.now())) {
+                            return false; // missed shifts are archived
+                          }
+                          return true; // scheduled active shift
+                        }
+                      }).toList();
+
+                      if (activeList.isEmpty) {
                         return Center(
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               Icon(Icons.calendar_month, size: 64, color: AppColors.outline.withOpacity(0.5)),
                               const SizedBox(height: 16),
-                              const Text('No shifts scheduled yet.', style: TextStyle(fontWeight: FontWeight.bold)),
+                              const Text('No active shifts rostered.', style: TextStyle(fontWeight: FontWeight.bold)),
                               const SizedBox(height: 8),
                               const Text('Tap the "+" icon above to create schedules.', style: TextStyle(fontSize: 12, color: AppColors.outline)),
                             ],
@@ -753,8 +844,7 @@ class _AdminDashboardScreenState extends ConsumerState<AdminDashboardScreen> {
                         );
                       }
                       // Sort shifts chronologically by start time descending
-                      final sortedList = List<ShiftModel>.from(list)..sort((a, b) => b.startTime.compareTo(a.startTime));
-                      final attendanceList = attendanceStream.value ?? [];
+                      final sortedList = List<ShiftModel>.from(activeList)..sort((a, b) => b.startTime.compareTo(a.startTime));
 
                       return ListView.builder(
                         itemCount: sortedList.length,
