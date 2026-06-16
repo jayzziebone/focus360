@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "624562117894",
+    "project_id": "shiftsync-mvp-8593",
+    "storage_bucket": "shiftsync-mvp-8593.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:624562117894:android:2c9ed2cff3e7491869d287",
+        "android_client_info": {
+          "package_name": "com.focus360.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCbhXXmRanNmLUPotJnQ59kmxnkJnl3DT4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

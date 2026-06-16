@@ -1,0 +1,102 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function signedIn() {
+      return request.auth != null;
+    }
+    
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    
+    function hasRole(role) {
+      return signedIn() && getUserData().role == role;
+    }
+
+    // --- Users Collection ---
+    match /users/{userId} {
+      allow read: if signedIn() && (
+        request.auth.uid == userId || 
+        getUserData().role == 'admin' ||
+        getUserData().role == 'employer' ||
+        (getUserData().role == 'employee' && resource.data.role == 'employer')
+      );
+      allow create: if signedIn() && request.auth.uid == userId && 
+        (request.resource.data.role == 'employee' || request.resource.data.role == 'employer');
+      allow update: if signedIn() && (
+        getUserData().role == 'admin' || 
+        (
+          request.auth.uid == userId && 
+          request.resource.data.role == resource.data.role && 
+          request.resource.data.employerId == resource.data.employerId && 
+          request.resource.data.employeeId == resource.data.employeeId
+        )
+      );
+    }
+
+    // --- Employers Collection ---
+    match /employers/{employerId} {
+      allow read: if signedIn() && (
+        getUserData().employerId == employerId || 
+        getUserData().role == 'admin'
+      );
+      allow write: if hasRole('admin');
+    }
+
+    // --- Locations Collection ---
+    match /locations/{locationId} {
+      allow read: if signedIn();
+      allow write: if hasRole('admin');
+    }
+
+    // --- Employees Collection ---
+    match /employees/{employeeId} {
+      allow read: if signedIn() && (
+        getUserData().employeeId == employeeId ||
+        getUserData().employerId == resource.data.employerId ||
+        getUserData().role == 'admin'
+      );
+      allow write: if hasRole('admin');
+    }
+
+    // --- Shifts Collection ---
+    match /shifts/{shiftId} {
+      allow read: if signedIn() && (
+        (getUserData().role == 'employee' && resource.data.employeeId == getUserData().employeeId) ||
+        (getUserData().role == 'employer' && resource.data.employerId == getUserData().employerId) ||
+        getUserData().role == 'admin'
+      );
+      allow write: if hasRole('admin');
+    }
+
+    // --- Attendance Records Collection ---
+    match /attendance_records/{recordId} {
+      allow read: if signedIn() && (
+        resource.data.employeeId == getUserData().employeeId ||
+        resource.data.employerId == getUserData().employerId ||
+        getUserData().role == 'admin'
+      );
+      // Employees can create/update only their own attendance records
+      allow create: if signedIn() && request.resource.data.employeeId == getUserData().employeeId;
+      allow update: if signedIn() && (
+        // Employees can punch out (update their own record)
+        (
+          request.resource.data.employeeId == getUserData().employeeId && 
+          (resource.data.approvedStatus == 'pending' || resource.data.approvedStatus == 'approved') &&
+          request.resource.data.approvedStatus == resource.data.approvedStatus
+        ) ||
+        // Employers can approve/reject
+        (getUserData().role == 'employer' && resource.data.employerId == getUserData().employerId) ||
+        getUserData().role == 'admin'
+      );
+    }
+
+    // --- Notifications Collection ---
+    match /notifications/{notificationId} {
+      allow read, update, delete: if signedIn() && resource.data.userId == request.auth.uid;
+      allow create: if signedIn();
+    }
+  }
+}
