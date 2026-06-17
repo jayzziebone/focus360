@@ -108,6 +108,18 @@ class EmployerRepository {
       rethrow;
     }
   }
+
+  // Stream of all attendance records for this employer
+  Stream<List<AttendanceRecordModel>> getEmployerAttendance(String employerId) {
+    return _firestore
+        .collection(AppConstants.attendanceCollection)
+        .where('employerId', isEqualTo: employerId)
+        .snapshots()
+        .map((snapshot) => snapshot.docs
+            .map((doc) => AttendanceRecordModel.fromMap(doc.data(), doc.id))
+            .toList());
+  }
+
   // Helper to send a notification to a specific user UID
   Future<void> _sendNotification({
     required String userId,

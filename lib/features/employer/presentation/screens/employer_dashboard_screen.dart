@@ -7,6 +7,7 @@ import 'package:shiftsync/features/notifications/presentation/widgets/notificati
 import 'package:shiftsync/features/employer/presentation/providers/employer_provider.dart';
 import 'package:shiftsync/features/employee/data/models/attendance_record_model.dart';
 import 'package:shiftsync/features/auth/data/models/user_model.dart';
+import 'package:shiftsync/features/employer/presentation/screens/employer_schedules_archive_screen.dart';
 
 class EmployerDashboardScreen extends ConsumerStatefulWidget {
   const EmployerDashboardScreen({super.key});
@@ -281,26 +282,86 @@ class _EmployerDashboardScreenState extends ConsumerState<EmployerDashboardScree
   // --- TAB: TODAY'S SHIFTS ---
   Widget _buildTodayTab() {
     final shiftsStream = ref.watch(employerShiftsProvider);
+    final attendanceAsync = ref.watch(employerAttendanceProvider);
 
     return Padding(
       padding: const EdgeInsets.all(20.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Staff Today',
-            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.secondary,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Staff Today',
+                      style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.secondary,
+                          ),
+                    ),
+                    const SizedBox(height: 4),
+                    const Text('Track shifts scheduled for today', style: TextStyle(color: AppColors.outline)),
+                  ],
                 ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.archive_outlined, color: AppColors.primary, size: 28),
+                tooltip: 'Schedules Archive',
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const EmployerSchedulesArchiveScreen(),
+                    ),
+                  );
+                },
+              ),
+            ],
           ),
-          const SizedBox(height: 4),
-          const Text('Track shifts scheduled for today', style: TextStyle(color: AppColors.outline)),
           const SizedBox(height: 24),
           Expanded(
             child: shiftsStream.when(
               data: (list) {
-                final todayShifts = list.where((s) => DateUtils.isSameDay(s.startTime.toLocal(), DateTime.now().toLocal())).toList();
+                final attendanceList = attendanceAsync.value ?? [];
+
+                // Filter out completed and missed shifts from today's active roster list
+                final todayShifts = list.where((s) {
+                  if (!DateUtils.isSameDay(s.startTime.toLocal(), DateTime.now().toLocal())) {
+                    return false;
+                  }
+
+                  final matchingRecord = attendanceList.firstWhere(
+                    (r) => r.shiftId == s.id,
+                    orElse: () => AttendanceRecordModel(
+                      id: '',
+                      employeeId: '',
+                      employeeName: '',
+                      employerId: '',
+                      shiftId: '',
+                      punchInTime: DateTime.fromMillisecondsSinceEpoch(0),
+                      punchInLatitude: 0,
+                      punchInLongitude: 0,
+                      punchInVerified: false,
+                      approvedStatus: 'pending',
+                    ),
+                  );
+
+                  if (matchingRecord.id.isNotEmpty) {
+                    if (matchingRecord.punchOutTime != null) {
+                      return false; // Completed shift, archived
+                    }
+                    return true; // Active / In progress
+                  } else {
+                    if (s.endTime.isBefore(DateTime.now())) {
+                      return false; // Missed shift, archived
+                    }
+                    return true; // Scheduled / Active
+                  }
+                }).toList();
 
                 if (todayShifts.isEmpty) {
                   return Center(
@@ -323,11 +384,39 @@ class _EmployerDashboardScreenState extends ConsumerState<EmployerDashboardScree
                     final shift = todayShifts[index];
                     final timeStr = '${DateFormat('hh:mm a').format(shift.startTime)} - ${DateFormat('hh:mm a').format(shift.endTime)}';
 
+                    final matchingRecord = attendanceList.firstWhere(
+                      (r) => r.shiftId == shift.id,
+                      orElse: () => AttendanceRecordModel(
+                        id: '',
+                        employeeId: '',
+                        employeeName: '',
+                        employerId: '',
+                        shiftId: '',
+                        punchInTime: DateTime.fromMillisecondsSinceEpoch(0),
+                        punchInLatitude: 0,
+                        punchInLongitude: 0,
+                        punchInVerified: false,
+                        approvedStatus: 'pending',
+                      ),
+                    );
+
+                    // Compute dynamic operational status: SCHEDULED, IN PROGRESS, MISSED, COMPLETED
+                    String displayStatus = 'SCHEDULED';
                     Color statusColor = AppColors.secondary;
-                    if (shift.status == 'in_progress') {
-                      statusColor = AppColors.primary;
-                    } else if (shift.status == 'completed') {
-                      statusColor = Colors.grey;
+
+                    if (matchingRecord.id.isNotEmpty) {
+                      if (matchingRecord.punchOutTime != null) {
+                        displayStatus = 'COMPLETED';
+                        statusColor = Colors.grey;
+                      } else if (matchingRecord.punchInTime != null && matchingRecord.approvedStatus == 'approved') {
+                        displayStatus = 'IN PROGRESS';
+                        statusColor = AppColors.primary;
+                      }
+                    } else {
+                      if (shift.endTime.isBefore(DateTime.now())) {
+                        displayStatus = 'MISSED';
+                        statusColor = AppColors.error;
+                      }
                     }
 
                     return Card(
@@ -362,7 +451,7 @@ class _EmployerDashboardScreenState extends ConsumerState<EmployerDashboardScree
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
-                            shift.status.toUpperCase(),
+                            displayStatus,
                             style: TextStyle(
                               color: statusColor,
                               fontWeight: FontWeight.bold,

@@ -58,3 +58,13 @@ final attendanceHistoryProvider = StreamProvider<List<AttendanceRecordModel>>((r
     return list;
   });
 });
+
+// Stream of all attendance records (pending and history) under this organization
+final employerAttendanceProvider = StreamProvider<List<AttendanceRecordModel>>((ref) {
+  final authState = ref.watch(authProvider);
+  final employerId = authState.userModel?.employerId;
+  if (employerId == null) return Stream.value([]);
+
+  final repository = ref.watch(employerRepositoryProvider);
+  return repository.getEmployerAttendance(employerId);
+});
