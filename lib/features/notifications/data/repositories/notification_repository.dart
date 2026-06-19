@@ -125,7 +125,7 @@ class NotificationRepository {
         if (defaultTargetPlatform == TargetPlatform.iOS) {
           String? apnsToken = await messaging.getAPNSToken();
           int retries = 0;
-          while (apnsToken == null && retries < 3) {
+          while (apnsToken == null && retries < 15) {
             await Future.delayed(const Duration(seconds: 1));
             apnsToken = await messaging.getAPNSToken();
             retries++;

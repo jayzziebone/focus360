@@ -24,6 +24,55 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
   print("Handling a background message: ${message.messageId}");
+
+  final RemoteNotification? notification = message.notification;
+  final Map<String, dynamic> data = message.data;
+
+  // Display a local notification for data-only background messages
+  if (notification == null && data.isNotEmpty && !kIsWeb) {
+    final String title = data['title'] ?? 'ShiftSync Alert';
+    final String body = data['body'] ?? '';
+
+    if (title.isNotEmpty || body.isNotEmpty) {
+      final FlutterLocalNotificationsPlugin localNotifications = FlutterLocalNotificationsPlugin();
+      
+      const AndroidInitializationSettings androidSettings =
+          AndroidInitializationSettings('@mipmap/launcher_icon');
+      const DarwinInitializationSettings iosSettings = DarwinInitializationSettings(
+        requestAlertPermission: false,
+        requestBadgePermission: false,
+        requestSoundPermission: false,
+      );
+      const InitializationSettings initSettings = InitializationSettings(
+        android: androidSettings,
+        iOS: iosSettings,
+      );
+
+      await localNotifications.initialize(initSettings);
+
+      await localNotifications.show(
+        message.hashCode,
+        title,
+        body,
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            'high_importance_channel',
+            'High Importance Notifications',
+            channelDescription: 'This channel is used for important notifications.',
+            importance: Importance.max,
+            priority: Priority.high,
+            icon: '@mipmap/launcher_icon',
+          ),
+          iOS: DarwinNotificationDetails(
+            presentAlert: true,
+            presentBadge: true,
+            presentSound: true,
+          ),
+        ),
+        payload: data.toString(),
+      );
+    }
+  }
 }
 
 void main() async {
@@ -50,20 +99,29 @@ void main() async {
     // Register FCM background handler
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
-    // Set foreground presentation options to trigger native iOS system banners when app is open
+    // Set foreground presentation options to alert: false on iOS so that
+    // we can manually handle foreground notification banners using flutter_local_notifications.
+    // This avoids double notifications and prevents main thread crashes on iOS.
     await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
-      alert: true,
-      sound: true,
-      badge: true,
+      alert: false,
+      sound: false,
+      badge: false,
     );
 
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-      // Initialize local notifications for Android only to avoid conflicts on iOS
+    if (!kIsWeb) {
+      // Initialize local notifications for both Android and iOS
       const AndroidInitializationSettings androidSettings =
           AndroidInitializationSettings('@mipmap/launcher_icon');
 
+      const DarwinInitializationSettings iosSettings = DarwinInitializationSettings(
+        requestAlertPermission: true,
+        requestBadgePermission: true,
+        requestSoundPermission: true,
+      );
+
       const InitializationSettings initSettings = InitializationSettings(
         android: androidSettings,
+        iOS: iosSettings,
       );
 
       await _localNotifications.initialize(
@@ -73,12 +131,14 @@ void main() async {
         },
       );
 
-      // Create Android notification channel with max/high importance
-      final AndroidFlutterLocalNotificationsPlugin? androidImplementation =
-          _localNotifications.resolvePlatformSpecificImplementation<
-              AndroidFlutterLocalNotificationsPlugin>();
-      if (androidImplementation != null) {
-        await androidImplementation.createNotificationChannel(_channel);
+      if (defaultTargetPlatform == TargetPlatform.android) {
+        // Create Android notification channel with max/high importance
+        final AndroidFlutterLocalNotificationsPlugin? androidImplementation =
+            _localNotifications.resolvePlatformSpecificImplementation<
+                AndroidFlutterLocalNotificationsPlugin>();
+        if (androidImplementation != null) {
+          await androidImplementation.createNotificationChannel(_channel);
+        }
       }
     }
 
@@ -87,8 +147,8 @@ void main() async {
       final RemoteNotification? notification = message.notification;
       final AndroidNotification? android = message.notification?.android;
 
-      // Only display local foreground notification banner on Android
-      if (notification != null && !kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      // Display custom foreground notification banner on both Android and iOS
+      if (notification != null && !kIsWeb) {
         _localNotifications.show(
           notification.hashCode,
           notification.title,
@@ -101,6 +161,11 @@ void main() async {
               importance: Importance.max,
               priority: Priority.high,
               icon: android?.smallIcon ?? '@mipmap/launcher_icon',
+            ),
+            iOS: const DarwinNotificationDetails(
+              presentAlert: true,
+              presentBadge: true,
+              presentSound: true,
             ),
           ),
           payload: message.data.toString(),
