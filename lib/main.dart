@@ -4,9 +4,19 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'app/app.dart';
 import 'core/constants/app_colors.dart';
 import 'firebase_options.dart';
+
+final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
+
+const AndroidNotificationChannel _channel = AndroidNotificationChannel(
+  'high_importance_channel', // id
+  'High Importance Notifications', // title
+  description: 'This channel is used for important notifications.', // description
+  importance: Importance.max,
+);
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -43,9 +53,74 @@ void main() async {
     // Set foreground presentation options to trigger native iOS system banners when app is open
     await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
       alert: true,
-      badge: true,
       sound: true,
+      badge: true,
     );
+
+    // Initialize local notifications for Android and iOS
+    const AndroidInitializationSettings androidSettings =
+        AndroidInitializationSettings('@mipmap/launcher_icon');
+
+    const DarwinInitializationSettings iosSettings = DarwinInitializationSettings(
+      requestAlertPermission: false,
+      requestBadgePermission: false,
+      requestSoundPermission: false,
+    );
+
+    const InitializationSettings initSettings = InitializationSettings(
+      android: androidSettings,
+      iOS: iosSettings,
+    );
+
+    await _localNotifications.initialize(
+      initSettings,
+      onDidReceiveNotificationResponse: (NotificationResponse response) {
+        print('=== [LOCAL NOTIFICATION] Notification clicked: ${response.payload} ===');
+      },
+    );
+
+    // Create Android notification channel with max/high importance
+    final AndroidFlutterLocalNotificationsPlugin? androidImplementation =
+        _localNotifications.resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+    if (androidImplementation != null) {
+      await androidImplementation.createNotificationChannel(_channel);
+    }
+
+    // Setup foreground message listener
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      final RemoteNotification? notification = message.notification;
+      final AndroidNotification? android = message.notification?.android;
+
+      if (notification != null && !kIsWeb) {
+        _localNotifications.show(
+          notification.hashCode,
+          notification.title,
+          notification.body,
+          NotificationDetails(
+            android: AndroidNotificationDetails(
+              _channel.id,
+              _channel.name,
+              channelDescription: _channel.description,
+              importance: Importance.max,
+              priority: Priority.high,
+              icon: android?.smallIcon ?? '@mipmap/launcher_icon',
+            ),
+            iOS: const DarwinNotificationDetails(
+              presentAlert: true,
+              presentBadge: true,
+              presentSound: true,
+            ),
+          ),
+          payload: message.data.toString(),
+        );
+      }
+    });
+
+    // Handle background notification clicks
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      print('=== [FCM] Notification opened app: ${message.messageId} ===');
+    });
   } catch (e) {
     isFirebaseConfigured = false;
     firebaseError = e.toString();
