@@ -57,34 +57,29 @@ void main() async {
       badge: true,
     );
 
-    // Initialize local notifications for Android and iOS
-    const AndroidInitializationSettings androidSettings =
-        AndroidInitializationSettings('@mipmap/launcher_icon');
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      // Initialize local notifications for Android only to avoid conflicts on iOS
+      const AndroidInitializationSettings androidSettings =
+          AndroidInitializationSettings('@mipmap/launcher_icon');
 
-    const DarwinInitializationSettings iosSettings = DarwinInitializationSettings(
-      requestAlertPermission: false,
-      requestBadgePermission: false,
-      requestSoundPermission: false,
-    );
+      const InitializationSettings initSettings = InitializationSettings(
+        android: androidSettings,
+      );
 
-    const InitializationSettings initSettings = InitializationSettings(
-      android: androidSettings,
-      iOS: iosSettings,
-    );
+      await _localNotifications.initialize(
+        initSettings,
+        onDidReceiveNotificationResponse: (NotificationResponse response) {
+          print('=== [LOCAL NOTIFICATION] Notification clicked: ${response.payload} ===');
+        },
+      );
 
-    await _localNotifications.initialize(
-      initSettings,
-      onDidReceiveNotificationResponse: (NotificationResponse response) {
-        print('=== [LOCAL NOTIFICATION] Notification clicked: ${response.payload} ===');
-      },
-    );
-
-    // Create Android notification channel with max/high importance
-    final AndroidFlutterLocalNotificationsPlugin? androidImplementation =
-        _localNotifications.resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>();
-    if (androidImplementation != null) {
-      await androidImplementation.createNotificationChannel(_channel);
+      // Create Android notification channel with max/high importance
+      final AndroidFlutterLocalNotificationsPlugin? androidImplementation =
+          _localNotifications.resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>();
+      if (androidImplementation != null) {
+        await androidImplementation.createNotificationChannel(_channel);
+      }
     }
 
     // Setup foreground message listener
@@ -92,7 +87,8 @@ void main() async {
       final RemoteNotification? notification = message.notification;
       final AndroidNotification? android = message.notification?.android;
 
-      if (notification != null && !kIsWeb) {
+      // Only display local foreground notification banner on Android
+      if (notification != null && !kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
         _localNotifications.show(
           notification.hashCode,
           notification.title,
@@ -105,11 +101,6 @@ void main() async {
               importance: Importance.max,
               priority: Priority.high,
               icon: android?.smallIcon ?? '@mipmap/launcher_icon',
-            ),
-            iOS: const DarwinNotificationDetails(
-              presentAlert: true,
-              presentBadge: true,
-              presentSound: true,
             ),
           ),
           payload: message.data.toString(),
