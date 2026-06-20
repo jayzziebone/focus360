@@ -18,5 +18,7 @@ class AppConstants {
   static const String userRoleKey = 'user_role';
 
   // FCM Configuration
-  static const String fcmServerKey = 'YOUR_SERVER_KEY';
+  static const String fcmProjectId = 'shiftsync-mvp-8593';
+  static const String fcmClientEmail = 'YOUR_CLIENT_EMAIL';
+  static const String fcmPrivateKey = 'YOUR_PRIVATE_KEY';
 }

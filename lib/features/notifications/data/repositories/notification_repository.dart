@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:googleapis_auth/auth_io.dart';
 import '../../../../core/constants/app_constants.dart';
 import '../models/notification_model.dart';
 
@@ -59,42 +60,84 @@ class NotificationRepository {
     }
   }
 
-  // Helper method to send a legacy FCM HTTP push message directly to device tokens
+  // Helper method to send an FCM HTTP v1 push message directly to device tokens
   Future<void> _sendFcmPush(List<String> tokens, String title, String body) async {
-    if (AppConstants.fcmServerKey.isEmpty || AppConstants.fcmServerKey == 'YOUR_SERVER_KEY') {
-      print('=== [FCM] FCM Server Key is not configured in AppConstants. Skipping push delivery. ===');
+    if (AppConstants.fcmClientEmail.isEmpty || 
+        AppConstants.fcmClientEmail == 'YOUR_CLIENT_EMAIL' ||
+        AppConstants.fcmPrivateKey.isEmpty || 
+        AppConstants.fcmPrivateKey == 'YOUR_PRIVATE_KEY') {
+      print('=== [FCM] FCM Service Account is not configured in AppConstants. Skipping push delivery. ===');
       return;
     }
 
-    final client = HttpClient();
     try {
-      final request = await client.postUrl(Uri.parse('https://fcm.googleapis.com/fcm/send'));
-      request.headers.set('Content-Type', 'application/json');
-      request.headers.set('Authorization', 'key=${AppConstants.fcmServerKey}');
+      // 1. Authenticate and get the OAuth2 access token using the Service Account credentials
+      final accountCredentials = ServiceAccountCredentials.fromJson({
+        "private_key": AppConstants.fcmPrivateKey.replaceAll(r'\n', '\n'),
+        "client_email": AppConstants.fcmClientEmail,
+        "project_id": AppConstants.fcmProjectId,
+        "type": "service_account",
+      });
 
-      final payload = {
-        'registration_ids': tokens,
-        'notification': {
-          'title': title,
-          'body': body,
-          'sound': 'default',
-        },
-        'data': {
-          'click_action': 'FLUTTER_NOTIFICATION_CLICK',
-          'title': title,
-          'body': body,
-        },
-      };
+      final authClient = await clientViaServiceAccount(
+        accountCredentials,
+        ['https://www.googleapis.com/auth/firebase.messaging'],
+      );
 
-      request.write(jsonEncode(payload));
-      final response = await request.close();
+      final String accessToken = authClient.credentials.accessToken.data;
+      final String url = 'https://fcm.googleapis.com/v1/projects/${AppConstants.fcmProjectId}/messages:send';
+
+      // 2. Send request to each target token (FCM v1 requires sending to individual tokens)
+      for (final String token in tokens) {
+        final client = HttpClient();
+        try {
+          final request = await client.postUrl(Uri.parse(url));
+          request.headers.set('Content-Type', 'application/json');
+          request.headers.set('Authorization', 'Bearer $accessToken');
+
+          final payload = {
+            'message': {
+              'token': token,
+              'notification': {
+                'title': title,
+                'body': body,
+              },
+              'data': {
+                'click_action': 'FLUTTER_NOTIFICATION_CLICK',
+                'title': title,
+                'body': body,
+              },
+              'android': {
+                'notification': {
+                  'channel_id': 'high_importance_channel',
+                  'sound': 'default',
+                }
+              },
+              'apns': {
+                'payload': {
+                  'aps': {
+                    'sound': 'default',
+                    'badge': 1,
+                  }
+                }
+              }
+            }
+          };
+
+          request.write(jsonEncode(payload));
+          final response = await request.close();
+          final responseBody = await response.transform(utf8.decoder).join();
+          print('=== [FCM] Direct FCM v1 Push to $token: ${response.statusCode} - $responseBody ===');
+        } catch (e) {
+          print('=== [FCM] Error sending direct FCM v1 push to $token: $e ===');
+        } finally {
+          client.close();
+        }
+      }
       
-      final responseBody = await response.transform(utf8.decoder).join();
-      print('=== [FCM] Direct FCM Push Response: ${response.statusCode} - $responseBody ===');
+      authClient.close();
     } catch (e) {
-      print('=== [FCM] Error sending direct FCM push: $e ===');
-    } finally {
-      client.close();
+      print('=== [FCM] Authentication or connection error during FCM v1 push: $e ===');
     }
   }
 
