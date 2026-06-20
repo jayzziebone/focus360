@@ -16,4 +16,7 @@ class AppConstants {
 
   // Shared Preference Keys / Mock defaults if any
   static const String userRoleKey = 'user_role';
+
+  // FCM Configuration
+  static const String fcmServerKey = 'YOUR_SERVER_KEY';
 }

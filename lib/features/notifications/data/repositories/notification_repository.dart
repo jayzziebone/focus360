@@ -1,7 +1,10 @@
+import 'dart:convert';
+import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../../core/constants/app_constants.dart';
 import '../models/notification_model.dart';
 
 class NotificationRepository {
@@ -19,7 +22,7 @@ class NotificationRepository {
             .toList());
   }
 
-  // Write a notification to Firestore
+  // Write a notification to Firestore and send a direct FCM push notification to the user's registered devices
   Future<void> sendNotification({
     required String userId,
     required String title,
@@ -27,6 +30,7 @@ class NotificationRepository {
     required String type,
   }) async {
     try {
+      // 1. Write the notification to Firestore (for In-App notifications inside the app)
       await _firestore.collection('notifications').add({
         'userId': userId,
         'title': title,
@@ -35,9 +39,62 @@ class NotificationRepository {
         'isRead': false,
         'createdAt': FieldValue.serverTimestamp(),
       });
+
+      // 2. Fetch the recipient user's registered FCM tokens from Firestore
+      final userDoc = await _firestore.collection('users').doc(userId).get();
+      if (userDoc.exists) {
+        final userData = userDoc.data();
+        if (userData != null && userData.containsKey('fcmTokens')) {
+          final List<dynamic> rawTokens = userData['fcmTokens'] ?? [];
+          final List<String> fcmTokens = rawTokens.map((t) => t.toString()).toList();
+          
+          if (fcmTokens.isNotEmpty) {
+            await _sendFcmPush(fcmTokens, title, body);
+          }
+        }
+      }
     } catch (e) {
       // Fail silently to keep primary database transactions safe and unblocked
-      print('Error writing notification: $e');
+      print('Error writing/sending notification: $e');
+    }
+  }
+
+  // Helper method to send a legacy FCM HTTP push message directly to device tokens
+  Future<void> _sendFcmPush(List<String> tokens, String title, String body) async {
+    if (AppConstants.fcmServerKey.isEmpty || AppConstants.fcmServerKey == 'YOUR_SERVER_KEY') {
+      print('=== [FCM] FCM Server Key is not configured in AppConstants. Skipping push delivery. ===');
+      return;
+    }
+
+    final client = HttpClient();
+    try {
+      final request = await client.postUrl(Uri.parse('https://fcm.googleapis.com/fcm/send'));
+      request.headers.set('Content-Type', 'application/json');
+      request.headers.set('Authorization', 'key=${AppConstants.fcmServerKey}');
+
+      final payload = {
+        'registration_ids': tokens,
+        'notification': {
+          'title': title,
+          'body': body,
+          'sound': 'default',
+        },
+        'data': {
+          'click_action': 'FLUTTER_NOTIFICATION_CLICK',
+          'title': title,
+          'body': body,
+        },
+      };
+
+      request.write(jsonEncode(payload));
+      final response = await request.close();
+      
+      final responseBody = await response.transform(utf8.decoder).join();
+      print('=== [FCM] Direct FCM Push Response: ${response.statusCode} - $responseBody ===');
+    } catch (e) {
+      print('=== [FCM] Error sending direct FCM push: $e ===');
+    } finally {
+      client.close();
     }
   }
 
